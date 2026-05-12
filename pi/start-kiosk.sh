@@ -39,6 +39,8 @@ trim_log() {
 # manually over ssh, it isn't — default to :0 and pick up the X authority file.
 export DISPLAY="${DISPLAY:-:0}"
 if [ -z "${XAUTHORITY:-}" ]; then
+  # shellcheck disable=SC2012
+  # Xorg-generated /tmp/serverauth.* names are all digits — `ls -t` is fine.
   XAUTH_FILE="$(ls -t /tmp/serverauth.* 2>/dev/null | head -1)"
   if [ -n "$XAUTH_FILE" ]; then
     export XAUTHORITY="$XAUTH_FILE"

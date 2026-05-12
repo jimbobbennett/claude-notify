@@ -20,13 +20,15 @@
   }
 
   function visibleSessions(sessions) {
-    // Dancing first by last_notify_at desc, then idle by last_seen desc.
+    // Dancing first; within each state group, sort alphabetically by label so
+    // positions stay stable across heartbeats (last_seen ticks constantly).
     const arr = Object.entries(sessions).map(([id, s]) => ({ id, ...s }));
     arr.sort((a, b) => {
       if (a.state !== b.state) return a.state === 'dancing' ? -1 : 1;
-      const aKey = a.state === 'dancing' ? a.last_notify_at : a.last_seen;
-      const bKey = b.state === 'dancing' ? b.last_notify_at : b.last_seen;
-      return bKey - aKey;
+      const aLabel = (a.label || '').toLowerCase();
+      const bLabel = (b.label || '').toLowerCase();
+      if (aLabel !== bLabel) return aLabel < bLabel ? -1 : 1;
+      return a.id < b.id ? -1 : 1;
     });
     return arr.slice(0, MAX_VISIBLE);
   }

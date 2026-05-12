@@ -64,11 +64,13 @@ def _session_id() -> str:
 
 
 def _snapshot() -> dict:
-    return {
-        "seq": _seq,
-        "now": time.time(),
-        "sessions": {sid: dict(s) for sid, s in _sessions.items()},
-    }
+    """Caller must NOT hold _lock — we acquire it here to iterate safely."""
+    with _lock:
+        return {
+            "seq": _seq,
+            "now": time.time(),
+            "sessions": {sid: dict(s) for sid, s in _sessions.items()},
+        }
 
 
 def _broadcast() -> None:

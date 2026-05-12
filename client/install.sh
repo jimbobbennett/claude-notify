@@ -69,6 +69,9 @@ if [ -n "$URL" ]; then
 fi
 
 # 3. Merge hook entries into settings.json.
+# shellcheck disable=SC2016
+# Single quotes are intentional: we want the literal "$HOME" string
+# embedded in settings.json so Claude Code's shell expands it at run time.
 HOOK_BASE='$HOME/.claude/hooks/hook-pi.sh'
 
 if ! command -v jq >/dev/null 2>&1; then

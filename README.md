@@ -208,10 +208,12 @@ From any machine on the same LAN:
 
 ```sh
 curl http://claude-notify.local:8080/state
-# {"message":"","seq":0,"session":"","state":"idle"}
+# {"seq":0,"now":1700000000.0,"sessions":{}}
 
-curl -X POST http://claude-notify.local:8080/notify
-# {"message":"","seq":1,"session":"","state":"dancing"}
+curl -X POST -H 'Content-Type: application/json' \
+  -d '{"session_id":"smoke","label":"smoke"}' \
+  http://claude-notify.local:8080/notify
+# {"seq":1,"now":...,"sessions":{"smoke":{"state":"dancing", ...}}}
 ```
 
 Open `http://claude-notify.local:8080/` in your browser and you should see
@@ -266,9 +268,11 @@ PowerShell can use the inline alternative further down.
 
 ### Prerequisites
 
-Both scripts use `curl` (everywhere by default) and `jq` (to extract the
-`cwd` field from Claude Code's hook payload). `jq` is optional — without
-it the Pi still dances, it just won't show the session label.
+The bash script uses `curl` and `jq` (to extract `session_id` / `cwd` from
+the hook payload). `jq` is optional — without it the Pi still works, but
+sessions all collapse into one default mascot since the script can't
+parse the JSON. The PowerShell script needs neither — it uses built-in
+`Invoke-RestMethod` and `ConvertFrom-Json`.
 
 | OS | Install `jq` |
 | --- | --- |
@@ -297,8 +301,8 @@ Settings file: `~/.claude/settings.json`. Hooks directory:
 
 ### Quick install (recommended)
 
-The repo ships with installers that copy the hook scripts and merge the
-four hook entries into `settings.json` for you. They're safe to re-run
+The repo ships with installers that copy the hook script and merge the
+seven hook entries into `settings.json` for you. They're safe to re-run
 (idempotent) and preserve any existing hooks you have.
 
 #### macOS / Linux / WSL / Git Bash
@@ -330,10 +334,12 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Both installers:
 
-- copy the hook scripts to `~/.claude/hooks/`
+- copy `hook-pi.sh` / `hook-pi.ps1` to `~/.claude/hooks/`
 - back up your existing `settings.json` (as `settings.json.bak.<timestamp>`)
-- add four hook entries (`Notification`, `Stop`, `UserPromptSubmit`,
-  `SessionEnd`), leaving anything else in the file untouched
+- add seven hook entries (`Notification`, `Stop`, `UserPromptSubmit`,
+  `SessionEnd`, `SessionStart`, `PreToolUse`, `PostToolUse`), leaving
+  anything else in the file untouched
+- scrub any entries from older versions (`notify-pi.sh`, `idle-pi.sh`)
 - skip an entry if your command is already wired in, so re-running is safe
 
 After the installer finishes, **restart Claude Code** (or open `/hooks`)
@@ -536,7 +542,7 @@ Everything lands in `~/claude-notify/logs/`:
 ```
 .
 ├── pi/
-│   ├── server.py                       # Flask server with /notify, /idle, /events
+│   ├── server.py                       # Flask: /notify, /idle, /heartbeat, /end, /events
 │   ├── start-kiosk.sh                  # Autostart entry point (hardened)
 │   ├── claude-notify-kiosk.desktop     # LXDE autostart file
 │   └── static/
@@ -549,7 +555,8 @@ Everything lands in `~/claude-notify/logs/`:
 │   └── install.ps1                     # Native Windows / PowerShell installer
 └── docs/
     ├── idle.png
-    └── dancing.png
+    ├── dancing.png
+    └── dancing.gif
 ```
 
 ---
