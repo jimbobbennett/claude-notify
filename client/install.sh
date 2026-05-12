@@ -146,9 +146,9 @@ jq \
   install_hook("Notification";     "notify";    null)
   | install_hook("Stop";           "notify";    null)
   | install_hook("UserPromptSubmit"; "idle";    null)
-  # SessionEnd requires a matcher or it silently does not fire — use a wildcard
-  # regex so we catch every why_session_ended reason (/exit, /clear, logout, ...)
-  | install_hook("SessionEnd";     "end";       ".*")
+  # SessionEnd matcher is exact-string-or-pipe-list (NOT regex). Listing every
+  # why_session_ended value catches /exit, /clear, logout, etc.
+  | install_hook("SessionEnd";     "end";       "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other")
   | install_hook("SessionStart";   "heartbeat"; null)
   | install_hook("PreToolUse";     "heartbeat"; null)
   | install_hook("PostToolUse";    "heartbeat"; null)

@@ -112,9 +112,9 @@ function Install-Hook {
 Install-Hook -EventName 'Notification'     -Sub 'notify'
 Install-Hook -EventName 'Stop'             -Sub 'notify'
 Install-Hook -EventName 'UserPromptSubmit' -Sub 'idle'
-# SessionEnd requires a matcher or it silently does not fire — use a wildcard
-# regex so we catch every why_session_ended reason (/exit, /clear, logout, ...)
-Install-Hook -EventName 'SessionEnd'       -Sub 'end'      -Matcher '.*'
+# SessionEnd matcher is exact-string-or-pipe-list (NOT regex). Listing every
+# why_session_ended value catches /exit, /clear, logout, etc.
+Install-Hook -EventName 'SessionEnd'       -Sub 'end'      -Matcher 'clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other'
 Install-Hook -EventName 'SessionStart'     -Sub 'heartbeat'
 Install-Hook -EventName 'PreToolUse'       -Sub 'heartbeat'
 Install-Hook -EventName 'PostToolUse'      -Sub 'heartbeat'

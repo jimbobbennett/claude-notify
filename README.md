@@ -416,7 +416,7 @@ platforms is bash, so `$HOME` expands correctly:
     "Notification":     [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh notify"    }] }],
     "Stop":             [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh notify"    }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh idle"      }] }],
-    "SessionEnd":       [{ "matcher": ".*", "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh end" }] }],
+    "SessionEnd":       [{ "matcher": "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other", "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh end" }] }],
     "SessionStart":     [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }],
     "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }],
     "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }]
@@ -433,7 +433,7 @@ each hook entry and point at the `.ps1` file:
     "Notification":     [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" notify"    }] }],
     "Stop":             [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" notify"    }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" idle"      }] }],
-    "SessionEnd":       [{ "matcher": ".*", "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" end" }] }],
+    "SessionEnd":       [{ "matcher": "clear|resume|logout|prompt_input_exit|bypass_permissions_disabled|other", "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" end" }] }],
     "SessionStart":     [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }],
     "PreToolUse":       [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }],
     "PostToolUse":      [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }]
