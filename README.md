@@ -6,7 +6,7 @@ your input.
 
 | Idle / bored | Dancing (input needed) |
 | --- | --- |
-| ![](docs/idle.png) | ![](docs/dancing.png) |
+| ![](docs/idle.png) | ![](docs/dancing.gif) |
 
 When you're heads-down in another window and Claude Code is sitting there asking
 "can I run this command?" or "what next?", the Pi spots it via a hook and the
