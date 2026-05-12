@@ -67,7 +67,11 @@ function Is-StaleHook {
 }
 
 function Install-Hook {
-  param([string]$EventName, [string]$Sub)
+  param(
+    [string]$EventName,
+    [string]$Sub,
+    [string]$Matcher = $null
+  )
 
   $newCmd = "$hookBase $Sub"
 
@@ -89,7 +93,7 @@ function Install-Hook {
     }
   }
 
-  $cleanMatchers += [PSCustomObject]@{
+  $entry = [PSCustomObject]@{
     hooks = @(
       [PSCustomObject]@{
         type    = 'command'
@@ -98,13 +102,19 @@ function Install-Hook {
       }
     )
   }
+  if ($Matcher) {
+    $entry | Add-Member -NotePropertyName 'matcher' -NotePropertyValue $Matcher
+  }
+  $cleanMatchers += $entry
   $json.hooks.$EventName = $cleanMatchers
 }
 
 Install-Hook -EventName 'Notification'     -Sub 'notify'
 Install-Hook -EventName 'Stop'             -Sub 'notify'
 Install-Hook -EventName 'UserPromptSubmit' -Sub 'idle'
-Install-Hook -EventName 'SessionEnd'       -Sub 'end'
+# SessionEnd requires a matcher or it silently does not fire — use a wildcard
+# regex so we catch every why_session_ended reason (/exit, /clear, logout, ...)
+Install-Hook -EventName 'SessionEnd'       -Sub 'end'      -Matcher '.*'
 Install-Hook -EventName 'SessionStart'     -Sub 'heartbeat'
 Install-Hook -EventName 'PreToolUse'       -Sub 'heartbeat'
 Install-Hook -EventName 'PostToolUse'      -Sub 'heartbeat'

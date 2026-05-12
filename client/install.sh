@@ -130,20 +130,28 @@ jq \
     )
     | map(select((.hooks // []) | length > 0));
 
-  def install_hook($event; $sub):
+  def install_hook($event; $sub; $matcher):
     .hooks //= {} |
     .hooks[$event] = (
       ((.hooks[$event] // []) | scrub($base; $sub))
-      + [{ hooks: [{ type: "command", command: ($base + " " + $sub) }] }]
+      + [(
+          if $matcher == null
+          then { hooks: [{ type: "command", command: ($base + " " + $sub) }] }
+          else { matcher: $matcher,
+                 hooks: [{ type: "command", command: ($base + " " + $sub) }] }
+          end
+        )]
     );
 
-  install_hook("Notification";     "notify")
-  | install_hook("Stop";           "notify")
-  | install_hook("UserPromptSubmit"; "idle")
-  | install_hook("SessionEnd";     "end")
-  | install_hook("SessionStart";   "heartbeat")
-  | install_hook("PreToolUse";     "heartbeat")
-  | install_hook("PostToolUse";    "heartbeat")
+  install_hook("Notification";     "notify";    null)
+  | install_hook("Stop";           "notify";    null)
+  | install_hook("UserPromptSubmit"; "idle";    null)
+  # SessionEnd requires a matcher or it silently does not fire — use a wildcard
+  # regex so we catch every why_session_ended reason (/exit, /clear, logout, ...)
+  | install_hook("SessionEnd";     "end";       ".*")
+  | install_hook("SessionStart";   "heartbeat"; null)
+  | install_hook("PreToolUse";     "heartbeat"; null)
+  | install_hook("PostToolUse";    "heartbeat"; null)
   ' "$SETTINGS" > "$TMP"
 mv "$TMP" "$SETTINGS"
 echo "Merged hook entries into $SETTINGS (backup: $BACKUP)"

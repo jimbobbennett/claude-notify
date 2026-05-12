@@ -178,7 +178,7 @@ body[data-anydancing="1"] {
   position: absolute;
   top: 4px; left: 4px; right: 4px;
   text-align: center;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: #fff;
@@ -188,8 +188,8 @@ body[data-anydancing="1"] {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.grid[data-count="1"] .label { font-size: 16px; top: 8px; }
-.grid[data-count="2"] .label { font-size: 14px; }
+.grid[data-count="1"] .label { font-size: 19px; top: 8px; }
+.grid[data-count="2"] .label { font-size: 16px; }
 
 .activity {
   position: absolute;
