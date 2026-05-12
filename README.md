@@ -1,7 +1,8 @@
 # Claude Notify
 
 A little Claude character that lives on a Raspberry Pi's touchscreen and dances
-whenever Claude Code on your Mac is waiting for your input.
+whenever Claude Code on your Mac, Linux box, or Windows machine is waiting for
+your input.
 
 | Idle / bored | Dancing (input needed) |
 | --- | --- |
@@ -16,18 +17,19 @@ little character springs to life with the name of the project that's waiting.
 ## How it works
 
 ```
-┌─────────────────────────┐                 ┌──────────────────────────────┐
-│ Mac running Claude Code │                 │  Raspberry Pi @ host.local   │
-│                         │                 │                              │
-│  ~/.claude/settings.json│                 │  Flask server on :8080       │
-│   ├─ Notification hook ─┼─── HTTP POST ──►│   ├─ POST /notify  → dance   │
-│   ├─ Stop hook ─────────┼─── HTTP POST ──►│   ├─ POST /idle    → bored   │
-│   └─ UserPromptSubmit ──┼─── HTTP POST ──►│   └─ GET  /events  (SSE)     │
-│                         │                 │                              │
-│  ~/.claude/hooks/       │                 │  Chromium kiosk → index.html │
-│   ├─ notify-pi.sh       │                 │   └─ SVG mascot + CSS anims  │
-│   └─ idle-pi.sh         │                 │                              │
-└─────────────────────────┘                 └──────────────────────────────┘
+┌──────────────────────────┐                 ┌──────────────────────────────┐
+│ Mac / Linux / Windows    │                 │  Raspberry Pi @ host.local   │
+│ running Claude Code      │                 │                              │
+│                          │                 │  Flask server on :8080       │
+│  ~/.claude/settings.json │                 │   ├─ POST /notify  → dance   │
+│   ├─ Notification hook ──┼─── HTTP POST ──►│   ├─ POST /idle    → bored   │
+│   ├─ Stop hook ──────────┼─── HTTP POST ──►│   └─ GET  /events  (SSE)     │
+│   └─ UserPromptSubmit ───┼─── HTTP POST ──►│                              │
+│                          │                 │  Chromium kiosk → index.html │
+│  ~/.claude/hooks/        │                 │   └─ SVG mascot + CSS anims  │
+│   ├─ notify-pi.sh / .ps1 │                 │                              │
+│   └─ idle-pi.sh   / .ps1 │                 │                              │
+└──────────────────────────┘                 └──────────────────────────────┘
 ```
 
 Three Claude Code [hook events](https://docs.anthropic.com/en/docs/claude-code/hooks)
@@ -184,7 +186,7 @@ cd ~/claude-notify
 python3 server.py
 ```
 
-In another shell on your Mac:
+From any machine on the same LAN:
 
 ```sh
 curl http://claude-notify.local:8080/state
@@ -194,8 +196,8 @@ curl -X POST http://claude-notify.local:8080/notify
 # {"message":"","seq":1,"session":"","state":"dancing"}
 ```
 
-Open `http://claude-notify.local:8080/` in your Mac's browser and you should
-see the mascot. Tap (or click) once to toggle states for a quick smoke test.
+Open `http://claude-notify.local:8080/` in your browser and you should see
+the mascot. Tap (or click) once to toggle states for a quick smoke test.
 
 `Ctrl-C` the server when you're satisfied.
 
@@ -237,41 +239,127 @@ sudo apt install -y unclutter
 
 ---
 
-## Mac-side install
+## Client-side install (macOS, Linux, Windows)
+
+The "client" is whatever machine runs Claude Code. The supplied hook
+scripts are plain POSIX shell — they work as-is on **macOS**, **Linux**,
+and on **Windows under WSL or Git Bash**. Windows users who prefer native
+PowerShell can use the inline alternative further down.
+
+### Prerequisites
+
+Both scripts use `curl` (everywhere by default) and `jq` (to extract the
+`cwd` field from Claude Code's hook payload). `jq` is optional — without
+it the Pi still dances, it just won't show the session label.
+
+| OS | Install `jq` |
+| --- | --- |
+| macOS | `brew install jq` (often already present) |
+| Debian / Ubuntu / Raspberry Pi OS | `sudo apt install jq` |
+| Fedora / RHEL | `sudo dnf install jq` |
+| Arch | `sudo pacman -S jq` |
+| Windows (winget) | `winget install jqlang.jq` |
+| Windows (scoop) | `scoop install jq` |
+| Windows (choco) | `choco install jq` |
+
+### Claude Code settings location
+
+Claude Code reads its user-level settings from the same path on every
+platform — your home directory. Below, `~` and `$HOME` mean:
+
+| OS | `$HOME` resolves to |
+| --- | --- |
+| macOS | `/Users/<you>` |
+| Linux | `/home/<you>` |
+| Windows (Git Bash / WSL) | `/c/Users/<you>` or your WSL `$HOME` |
+| Windows (PowerShell) | `$env:USERPROFILE` (e.g. `C:\Users\<you>`) |
+
+Settings file: `~/.claude/settings.json`. Hooks directory:
+`~/.claude/hooks/`. Both are created on first use if they don't exist.
 
 ### 1. Copy the hook scripts
 
+#### macOS / Linux / WSL / Git Bash
+
 ```sh
 mkdir -p ~/.claude/hooks
-cp mac/notify-pi.sh ~/.claude/hooks/
-cp mac/idle-pi.sh   ~/.claude/hooks/
+cp client/notify-pi.sh ~/.claude/hooks/
+cp client/idle-pi.sh   ~/.claude/hooks/
 chmod +x ~/.claude/hooks/notify-pi.sh ~/.claude/hooks/idle-pi.sh
 ```
 
 Quick test:
 
 ```sh
-echo '{"cwd":"/Users/you/some-project","hook_event_name":"Notification"}' \
+echo '{"cwd":"/path/to/some-project","hook_event_name":"Notification"}' \
   | ~/.claude/hooks/notify-pi.sh
 sleep 1
 curl http://claude-notify.local:8080/state
 # {"message":"","seq":N,"session":"some-project","state":"dancing"}
 ```
 
-The Pi should be dancing with "some-project" at the top.
+#### Windows (native PowerShell, no Git Bash / WSL)
 
-If your Pi isn't at `claude-notify.local`, set the URL:
+If you don't want a bash environment on Windows, drop these two files
+into `$env:USERPROFILE\.claude\hooks\` instead. They use only built-in
+PowerShell:
 
-```sh
-echo 'export CLAUDE_NOTIFY_URL=http://192.168.1.42:8080' >> ~/.zshrc
+**`notify-pi.ps1`**
+
+```powershell
+$ErrorActionPreference = 'SilentlyContinue'
+$url = if ($env:CLAUDE_NOTIFY_URL) { $env:CLAUDE_NOTIFY_URL } else { 'http://claude-notify.local:8080' }
+$raw = [Console]::In.ReadToEnd()
+$session = ''
+$message = ''
+try {
+  $obj = $raw | ConvertFrom-Json
+  if ($obj.cwd)     { $session = Split-Path $obj.cwd -Leaf }
+  if ($obj.message) { $message = $obj.message }
+} catch {}
+$body = @{ session = $session; message = $message } | ConvertTo-Json -Compress
+Invoke-RestMethod -Uri "$url/notify" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 2 | Out-Null
+exit 0
 ```
 
-(Or edit the two shell scripts directly.)
+**`idle-pi.ps1`**
+
+```powershell
+$ErrorActionPreference = 'SilentlyContinue'
+$url = if ($env:CLAUDE_NOTIFY_URL) { $env:CLAUDE_NOTIFY_URL } else { 'http://claude-notify.local:8080' }
+Invoke-RestMethod -Uri "$url/idle" -Method Post -TimeoutSec 2 | Out-Null
+exit 0
+```
+
+Test from PowerShell:
+
+```powershell
+'{"cwd":"C:\\Users\\you\\some-project","hook_event_name":"Notification"}' `
+  | & "$env:USERPROFILE\.claude\hooks\notify-pi.ps1"
+Start-Sleep 1
+Invoke-RestMethod http://claude-notify.local:8080/state
+```
+
+### Overriding the Pi URL
+
+If your Pi isn't at `claude-notify.local`, set `CLAUDE_NOTIFY_URL` to its
+address. The scripts pick it up from the environment.
+
+| Shell | Persistent override |
+| --- | --- |
+| bash / zsh (macOS, Linux, Git Bash, WSL) | `echo 'export CLAUDE_NOTIFY_URL=http://192.168.1.42:8080' >> ~/.bashrc` (or `~/.zshrc`) |
+| fish | `set -Ux CLAUDE_NOTIFY_URL http://192.168.1.42:8080` |
+| PowerShell | `[Environment]::SetEnvironmentVariable('CLAUDE_NOTIFY_URL','http://192.168.1.42:8080','User')` |
+
+You can also just edit the URL in the script files directly.
 
 ### 2. Wire the hooks into Claude Code
 
-Edit `~/.claude/settings.json` and add a `hooks` block. Merge with any
-existing keys:
+Edit `~/.claude/settings.json` (or `%USERPROFILE%\.claude\settings.json`
+on Windows) and add a `hooks` block. Merge with any existing keys.
+
+**macOS / Linux / WSL / Git Bash** — Claude Code's default shell on these
+platforms is bash, so `$HOME` expands correctly:
 
 ```json
 {
@@ -301,6 +389,37 @@ existing keys:
 }
 ```
 
+**Native Windows (PowerShell variant)** — add `"shell": "powershell"` to
+each hook entry and point at the `.ps1` files:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "hooks": [
+          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\notify-pi.ps1\"" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\notify-pi.ps1\"" }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\idle-pi.ps1\"" }
+        ]
+      }
+    ]
+  }
+}
+```
+
 Restart Claude Code (or open the `/hooks` menu once to force a reload —
 Claude Code only watches files that existed when the session started).
 
@@ -312,10 +431,11 @@ permission, and the Pi should light up.
 ## Customization
 
 - **Different host / port:** set `CLAUDE_NOTIFY_URL` in your shell env, or
-  edit `mac/notify-pi.sh` and `mac/idle-pi.sh`.
+  edit `client/notify-pi.sh` (and your local PowerShell copy on Windows).
 - **Different session label:** the script forwards `cwd` basename by
-  default. Edit the `jq` expression in `mac/notify-pi.sh` to send something
-  else — e.g. `session: (.session_id // "")` or a fixed string.
+  default. Edit the `jq` expression in `client/notify-pi.sh` to send
+  something else — e.g. `session: (.session_id // "")` or a fixed string.
+  In the PowerShell version, change the `Split-Path $obj.cwd -Leaf` line.
 - **Auto-idle timeout:** if Claude Code crashes the Pi could be stuck
   dancing forever. The server falls back to idle after 10 minutes; tune
   `AUTO_IDLE_SECONDS` in `pi/server.py`.
@@ -351,9 +471,17 @@ echo '{}' | ~/.claude/hooks/notify-pi.sh; sleep 1
 curl http://claude-notify.local:8080/state
 ```
 
-**`curl` from Mac sometimes times out resolving `claude-notify.local`.**
-That's macOS's mDNS resolver being moody. The Pi is still reachable — try
-the raw IP, or `dscacheutil -flushcache` on the Mac.
+**`curl` sometimes times out resolving `claude-notify.local`.**
+mDNS resolvers can get cranky. The Pi is still reachable — try the raw
+IP, then flush the cache:
+
+- macOS: `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`
+- Linux: `sudo systemctl restart avahi-daemon` (if installed)
+- Windows: `ipconfig /flushdns`
+
+If `.local` resolution doesn't work on Windows at all, install
+[Bonjour Print Services](https://support.apple.com/kb/DL999) or just
+hard-code the Pi's IP via `CLAUDE_NOTIFY_URL`.
 
 **Animation is jerky.**
 Chromium is software-rendering on the Pi (most small SPI LCDs can't
@@ -389,9 +517,11 @@ Everything lands in `~/claude-notify/logs/`:
 │       ├── index.html                  # SVG mascot + status / session label
 │       ├── style.css                   # Idle bob, bored cycle, dance
 │       └── app.js                      # SSE client, state machine
-├── mac/
+├── client/                             # Hook scripts for the Claude-Code host
 │   ├── notify-pi.sh                    # POST /notify, forwards cwd basename
 │   └── idle-pi.sh                      # POST /idle
+│                                       # (Windows-PowerShell variants are
+│                                       #  inline in the README.)
 └── docs/
     ├── idle.png
     └── dancing.png
