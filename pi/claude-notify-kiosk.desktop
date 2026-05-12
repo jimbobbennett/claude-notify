@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Notify Kiosk
+Comment=Launch Chromium in kiosk mode pointing at the local Claude Notify server
+Exec=/home/jim/claude-notify/start-kiosk.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false
