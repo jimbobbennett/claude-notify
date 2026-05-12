@@ -17,38 +17,51 @@ little character springs to life with the name of the project that's waiting.
 ## How it works
 
 ```
-┌──────────────────────────┐                 ┌──────────────────────────────┐
-│ Mac / Linux / Windows    │                 │  Raspberry Pi @ host.local   │
-│ running Claude Code      │                 │                              │
-│                          │                 │  Flask server on :8080       │
-│  ~/.claude/settings.json │                 │   ├─ POST /notify  → dance   │
-│   ├─ Notification hook ──┼─── HTTP POST ──►│   ├─ POST /idle    → bored   │
-│   ├─ Stop hook ──────────┼─── HTTP POST ──►│   └─ GET  /events  (SSE)     │
-│   └─ UserPromptSubmit ───┼─── HTTP POST ──►│                              │
-│                          │                 │  Chromium kiosk → index.html │
-│  ~/.claude/hooks/        │                 │   └─ SVG mascot + CSS anims  │
-│   ├─ notify-pi.sh / .ps1 │                 │                              │
-│   └─ idle-pi.sh   / .ps1 │                 │                              │
-└──────────────────────────┘                 └──────────────────────────────┘
+┌──────────────────────────┐                  ┌──────────────────────────────┐
+│ Mac / Linux / Windows    │                  │  Raspberry Pi @ host.local   │
+│ running Claude Code      │                  │                              │
+│                          │                  │  Flask server on :8080       │
+│  ~/.claude/settings.json │                  │   ├─ POST /notify  → dance   │
+│   ├─ Notification    ────┼──┐               │   ├─ POST /idle    → bored   │
+│   ├─ Stop            ────┼──┤               │   ├─ POST /heartbeat → tick  │
+│   ├─ UserPromptSubmit ───┼──┤               │   ├─ POST /end     → remove  │
+│   ├─ SessionStart    ────┼──┼── HTTP POST ─►│   └─ GET  /events  (SSE)     │
+│   ├─ SessionEnd      ────┼──┤               │                              │
+│   ├─ PreToolUse      ────┼──┤               │  Chromium kiosk → index.html │
+│   └─ PostToolUse     ────┼──┘               │   └─ Grid of SVG mascots,    │
+│                          │                  │      one per Claude session  │
+│  ~/.claude/hooks/        │                  │                              │
+│   └─ hook-pi.sh / .ps1   │                  │                              │
+└──────────────────────────┘                  └──────────────────────────────┘
 ```
 
-Three Claude Code [hook events](https://docs.anthropic.com/en/docs/claude-code/hooks)
-are wired up:
+Each Claude Code session is tracked separately on the Pi by its `session_id`,
+so multiple Claudes running in parallel get their own mascot in a small grid
+(up to 4 visible at once, dancing ones bubble to the front).
 
-| Hook | Pi action | Triggers when |
+Seven Claude Code [hook events](https://docs.anthropic.com/en/docs/claude-code/hooks)
+are wired up, all to a single `hook-pi` script with a subcommand:
+
+| Hook | Subcommand | Pi action |
 | --- | --- | --- |
-| `Notification` | Dance, with the `cwd` basename as the label | Claude Code surfaces a permission prompt or asks a question |
-| `Stop` | Dance | Claude Code finishes a turn (it's now waiting on you) |
-| `UserPromptSubmit` | Back to bored | You hit enter on a new prompt |
-| `SessionEnd` | Back to bored | You quit Claude Code (`/exit`, `/clear`, logout) |
+| `Notification` | `notify` | That session's mascot starts dancing |
+| `Stop` | `notify` | That session's mascot starts dancing |
+| `UserPromptSubmit` | `idle` | Back to bored |
+| `SessionEnd` | `end` | Remove the mascot from the grid |
+| `SessionStart` | `heartbeat` | Add the mascot to the grid (idle) |
+| `PreToolUse` | `heartbeat` | Keep alive + show a whimsy word ("Frobnicating…") |
+| `PostToolUse` | `heartbeat` | Same as above |
 
-Hard kills (closing the terminal, `kill -9`) don't fire `SessionEnd`. The
-server falls back to idle after `AUTO_IDLE_SECONDS` (default 10 minutes) so
-the mascot can't get stuck dancing forever.
+`PreToolUse` and `PostToolUse` are pure heartbeats — they fire continuously
+while Claude is working through tool calls, refreshing the session's
+"last seen" timestamp and (optionally) updating the whimsy activity word.
+After 10 minutes with no hook activity at all, the mascot is evicted. Hard
+kills (closing the terminal, `kill -9`) don't fire `SessionEnd`, so this
+eviction is the safety net.
 
-The Pi runs a tiny Flask server that holds the current state and streams changes
-to the browser via Server-Sent Events. The browser is just Chromium in kiosk
-mode rendering an SVG mascot with CSS keyframe animations.
+The Pi runs a tiny Flask server that holds per-session state and streams
+snapshots to the browser via Server-Sent Events. The browser is Chromium in
+kiosk mode rendering a grid of SVG mascots with CSS keyframe animations.
 
 ---
 
@@ -330,40 +343,38 @@ to pick up the new hooks. Skip ahead to [Customization](#customization).
 
 If you'd rather wire things up by hand, follow the two steps below.
 
-#### 1. Copy the hook scripts
+#### 1. Copy the hook script
 
 **macOS / Linux / WSL / Git Bash:**
 
 ```sh
 mkdir -p ~/.claude/hooks
-cp client/notify-pi.sh ~/.claude/hooks/
-cp client/idle-pi.sh   ~/.claude/hooks/
-chmod +x ~/.claude/hooks/notify-pi.sh ~/.claude/hooks/idle-pi.sh
+cp client/hook-pi.sh ~/.claude/hooks/
+chmod +x ~/.claude/hooks/hook-pi.sh
 ```
 
 Quick test:
 
 ```sh
-echo '{"cwd":"/path/to/some-project","hook_event_name":"Notification"}' \
-  | ~/.claude/hooks/notify-pi.sh
+echo '{"session_id":"abc","cwd":"/path/to/some-project"}' \
+  | ~/.claude/hooks/hook-pi.sh notify
 sleep 1
 curl http://claude-notify.local:8080/state
-# {"message":"","seq":N,"session":"some-project","state":"dancing"}
+# {"sessions":{"abc":{"state":"dancing","label":"some-project", ...}}, ...}
 ```
 
 **Windows (native PowerShell):**
 
 ```powershell
 New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\hooks" | Out-Null
-Copy-Item client\notify-pi.ps1 "$env:USERPROFILE\.claude\hooks\"
-Copy-Item client\idle-pi.ps1   "$env:USERPROFILE\.claude\hooks\"
+Copy-Item client\hook-pi.ps1 "$env:USERPROFILE\.claude\hooks\"
 ```
 
 Quick test:
 
 ```powershell
-'{"cwd":"C:\\Users\\you\\some-project","hook_event_name":"Notification"}' `
-  | & "$env:USERPROFILE\.claude\hooks\notify-pi.ps1"
+'{"session_id":"abc","cwd":"C:\\Users\\you\\some-project"}' `
+  | & "$env:USERPROFILE\.claude\hooks\hook-pi.ps1" notify
 Start-Sleep 1
 Invoke-RestMethod http://claude-notify.local:8080/state
 ```
@@ -386,6 +397,9 @@ You can also just edit the URL in the script files directly.
 
 Edit `~/.claude/settings.json` (or `%USERPROFILE%\.claude\settings.json`
 on Windows) and add a `hooks` block. Merge with any existing keys.
+**Seven hook events all point at the same `hook-pi` script with a
+subcommand** — strongly consider just using the installer; the manual
+JSON below is verbose.
 
 **macOS / Linux / WSL / Git Bash** — Claude Code's default shell on these
 platforms is bash, so `$HOME` expands correctly:
@@ -393,72 +407,30 @@ platforms is bash, so `$HOME` expands correctly:
 ```json
 {
   "hooks": {
-    "Notification": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/notify-pi.sh" }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/notify-pi.sh" }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/idle-pi.sh" }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "command": "$HOME/.claude/hooks/idle-pi.sh" }
-        ]
-      }
-    ]
+    "Notification":     [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh notify"    }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh notify"    }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh idle"      }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh end"       }] }],
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }],
+    "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "$HOME/.claude/hooks/hook-pi.sh heartbeat" }] }]
   }
 }
 ```
 
 **Native Windows (PowerShell variant)** — add `"shell": "powershell"` to
-each hook entry and point at the `.ps1` files:
+each hook entry and point at the `.ps1` file:
 
 ```json
 {
   "hooks": {
-    "Notification": [
-      {
-        "hooks": [
-          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\notify-pi.ps1\"" }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\notify-pi.ps1\"" }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\idle-pi.ps1\"" }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\idle-pi.ps1\"" }
-        ]
-      }
-    ]
+    "Notification":     [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" notify"    }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" notify"    }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" idle"      }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" end"       }] }],
+    "SessionStart":     [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }],
+    "PreToolUse":       [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\hook-pi.ps1\" heartbeat" }] }]
   }
 }
 ```
@@ -475,14 +447,22 @@ permission, and the Pi should light up.
 
 - **Different host / port:** pass `--url` / `-Url` to the installer, set
   `CLAUDE_NOTIFY_URL` in your shell env, or edit the default URL in
-  `client/notify-pi.sh` / `client/notify-pi.ps1`.
+  `client/hook-pi.sh` / `client/hook-pi.ps1`.
 - **Different session label:** the script forwards `cwd` basename by
-  default. Edit the `jq` expression in `client/notify-pi.sh` to send
-  something else — e.g. `session: (.session_id // "")` or a fixed string.
-  In the PowerShell version, change the `Split-Path $obj.cwd -Leaf` line.
-- **Auto-idle timeout:** if Claude Code crashes the Pi could be stuck
-  dancing forever. The server falls back to idle after 10 minutes; tune
-  `AUTO_IDLE_SECONDS` in `pi/server.py`.
+  default. Edit the `jq` expression in `client/hook-pi.sh` to send
+  something else — e.g. `.session_id` or a fixed string. In the
+  PowerShell version, change the `Split-Path $obj.cwd -Leaf` line.
+- **Whimsy word list:** add, remove, or replace the words in the awk
+  string in `client/hook-pi.sh` (`$words` array in `hook-pi.ps1`). The
+  Pi shows whichever word the most recent `PreToolUse` / `PostToolUse`
+  picked.
+- **Eviction timeout:** if a Claude session goes silent (hard kill, crash),
+  the mascot disappears after 10 minutes. Tune `IDLE_EVICT_SECONDS` in
+  `pi/server.py`. The activity word clears after `ACTIVITY_TIMEOUT`
+  seconds (default 10) of no heartbeat.
+- **Number of visible mascots:** the frontend shows the top 4 sessions
+  (dancing first, then idle). Tune `MAX_VISIBLE` in `pi/static/app.js`
+  and adjust the `.grid[data-count="..."]` rules in `pi/static/style.css`.
 - **Mascot / colours / animations:** all in `pi/static/style.css` and
   `pi/static/index.html`. Push the changed file with `scp` and kill
   Chromium — the kiosk loop reloads it within a few seconds.
@@ -511,7 +491,9 @@ started. Either restart Claude Code or open `/hooks` to force a reload.
 Test the hook scripts directly first:
 
 ```sh
-echo '{}' | ~/.claude/hooks/notify-pi.sh; sleep 1
+echo '{"session_id":"test","cwd":"/tmp/test"}' \
+  | ~/.claude/hooks/hook-pi.sh notify
+sleep 1
 curl http://claude-notify.local:8080/state
 ```
 
@@ -558,12 +540,11 @@ Everything lands in `~/claude-notify/logs/`:
 │   ├── start-kiosk.sh                  # Autostart entry point (hardened)
 │   ├── claude-notify-kiosk.desktop     # LXDE autostart file
 │   └── static/
-│       ├── index.html                  # SVG mascot + status / session label
-│       ├── style.css                   # Idle bob, bored cycle, dance
-│       └── app.js                      # SSE client, state machine
+│       ├── index.html                  # Grid container + card <template>
+│       ├── style.css                   # Grid layout, bob/bored/dance keyframes
+│       └── app.js                      # SSE client, per-session card management
 ├── client/                             # Hook scripts for the Claude-Code host
-│   ├── notify-pi.sh   / notify-pi.ps1  # POST /notify, forwards cwd basename
-│   ├── idle-pi.sh     / idle-pi.ps1    # POST /idle
+│   ├── hook-pi.sh     / hook-pi.ps1    # Universal hook: notify|idle|heartbeat|end
 │   ├── install.sh                      # macOS / Linux / WSL / Git Bash installer
 │   └── install.ps1                     # Native Windows / PowerShell installer
 └── docs/

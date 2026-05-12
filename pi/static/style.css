@@ -18,226 +18,198 @@ html, body {
   font-family: -apple-system, "Helvetica Neue", system-ui, sans-serif;
 }
 
+* { cursor: none !important; }
+
 body {
   background: radial-gradient(ellipse at 50% 40%, var(--bg-idle-b), var(--bg-idle-a) 75%);
   color: #e8d5b8;
   transition: background 0.8s ease;
 }
 
-body.state-dancing {
+body[data-anydancing="1"] {
   background: radial-gradient(ellipse at 50% 40%, var(--bg-dance-b), var(--bg-dance-a) 80%);
 }
 
-.stage {
-  position: relative;
+/* ============ GRID ============ */
+
+.grid {
   width: 100vw;
   height: 100vh;
+  display: grid;
+  gap: 4px;
+  padding: 4px;
+}
+
+.grid[data-count="0"] { display: none; }
+.grid[data-count="1"] { grid-template-columns: 1fr;       grid-template-rows: 1fr; }
+.grid[data-count="2"] { grid-template-columns: 1fr 1fr;   grid-template-rows: 1fr; }
+.grid[data-count="3"],
+.grid[data-count="4"] { grid-template-columns: 1fr 1fr;   grid-template-rows: 1fr 1fr; }
+
+.empty {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  opacity: 0.35;
+  pointer-events: none;
+}
+.grid[data-count="0"] ~ .empty { display: flex; }
+.grid:not([data-count="0"]) ~ .empty { display: none; }
+
+/* ============ CARD ============ */
+
+.card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  overflow: hidden;
+  --mascot-size: 200px;
 }
+
+.grid[data-count="1"] .card { --mascot-size: min(260px, 70vmin); }
+.grid[data-count="2"] .card { --mascot-size: min(180px, 50vmin); }
+.grid[data-count="3"] .card,
+.grid[data-count="4"] .card { --mascot-size: min(120px, 35vmin); }
 
 .shadow {
   position: absolute;
-  bottom: 18%;
+  bottom: 22%;
   left: 50%;
-  width: min(180px, 50vmin);
-  height: 18px;
+  width: calc(var(--mascot-size) * 0.62);
+  height: 12px;
   background: radial-gradient(ellipse, rgba(0,0,0,0.6), transparent 70%);
-  transform: translateX(-50%);
+  transform: translate3d(-50%, 0, 0);
   z-index: 0;
 }
 
-body.state-dancing .shadow {
-  animation: shadow-pulse 0.4s ease-in-out infinite alternate;
+.card.state-dancing .shadow {
+  animation: shadow-pulse 0.42s ease-in-out infinite alternate;
 }
 @keyframes shadow-pulse {
-  from { transform: translateX(-50%) scaleX(1); opacity: 0.9; }
-  to   { transform: translateX(-50%) scaleX(0.55); opacity: 0.5; }
+  from { transform: translate3d(-50%, 0, 0) scaleX(1);    opacity: 0.9; }
+  to   { transform: translate3d(-50%, 0, 0) scaleX(0.55); opacity: 0.5; }
 }
 
 .character {
   position: relative;
-  width: min(260px, 70vmin);
-  height: min(260px, 70vmin);
+  width: var(--mascot-size);
+  height: var(--mascot-size);
   z-index: 1;
   will-change: transform;
   transform: translateZ(0);
-  animation: idle-bob 3.4s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  animation: idle-bob 3.4s ease-in-out infinite;
 }
 
-.character svg {
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
+.character svg { width: 100%; height: 100%; overflow: visible; }
 
-.body-group { will-change: transform; }
-.rays { will-change: transform; transform-origin: 0 0; }
+/* Stagger so 4 cards don't all bob in sync. JS sets --i on each card. */
+.card { animation-delay: calc(var(--i, 0) * -0.7s); }
+.card .character { animation-delay: calc(var(--i, 0) * -0.8s); }
 
 @keyframes idle-bob {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(0deg); }
-  50%      { transform: translate3d(0, -6px, 0) rotate(-1deg); }
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(0, -5px, 0); }
 }
 
-/* Ray subtle wiggle on idle */
-.rays { transform-origin: 0 0; }
-.ray { transform-origin: 0 0; transition: transform 0.4s ease; }
-.ray-main ellipse, .ray-diag ellipse { transform-box: fill-box; transform-origin: center bottom; }
+/* ============ BORED ACTS (idle only) ============ */
 
-body.state-idle .character { animation: idle-bob 3.2s ease-in-out infinite; }
-
-/* ============ BORED ANIMATIONS (triggered by JS via classes on .character) ============ */
-
-.character.act-yawn .mouth { animation: yawn-mouth 1.6s ease-in-out 1; }
-.character.act-yawn .eyes  { animation: yawn-eyes 1.6s ease-in-out 1; }
-.character.act-yawn .body-group { animation: yawn-body 1.6s ease-in-out 1; }
+.card.state-idle .character.act-yawn  .mouth      { animation: yawn-mouth 1.6s ease-in-out 1; }
+.card.state-idle .character.act-yawn  .eyes       { animation: yawn-eyes  1.6s ease-in-out 1; }
+.card.state-idle .character.act-yawn  .body-group { animation: yawn-body  1.6s ease-in-out 1; }
 @keyframes yawn-mouth {
   0%, 100% { d: path("M -12 18 Q 0 24 12 18"); }
   30%, 70% { d: path("M -16 14 Q 0 36 16 14 Q 0 30 -16 14 Z"); }
 }
-@keyframes yawn-eyes {
-  0%, 100% { transform: scaleY(1); }
-  30%, 70% { transform: scaleY(0.15); }
-}
-@keyframes yawn-body {
-  0%, 100% { transform: scale(1, 1); }
-  35%      { transform: scale(0.95, 1.08); }
-  70%      { transform: scale(1.05, 0.92); }
-}
+@keyframes yawn-eyes  { 0%,100%{transform:scaleY(1);} 30%,70%{transform:scaleY(0.15);} }
+@keyframes yawn-body  { 0%,100%{transform:scale(1,1);} 35%{transform:scale(0.95,1.08);} 70%{transform:scale(1.05,0.92);} }
 
-.character.act-look .eyes { animation: look-eyes 2.4s ease-in-out 1; }
-@keyframes look-eyes {
-  0%, 100% { transform: translateX(0); }
-  20%, 40% { transform: translateX(-5px); }
-  60%, 80% { transform: translateX(5px); }
-}
+.card.state-idle .character.act-look  .eyes { animation: look-eyes 2.4s ease-in-out 1; }
+@keyframes look-eyes { 0%,100%{transform:translateX(0);} 20%,40%{transform:translateX(-5px);} 60%,80%{transform:translateX(5px);} }
 
-.character.act-blink .eyes { animation: blink 0.5s ease-in-out 1; }
-@keyframes blink {
-  0%, 100% { transform: scaleY(1); }
-  50%      { transform: scaleY(0.05); }
-}
+.card.state-idle .character.act-blink .eyes { animation: blink 0.5s ease-in-out 1; }
+@keyframes blink { 0%,100%{transform:scaleY(1);} 50%{transform:scaleY(0.05);} }
 
-.character.act-sigh .body-group { animation: sigh 1.8s ease-in-out 1; }
-.character.act-sigh .mouth      { animation: sigh-mouth 1.8s ease-in-out 1; }
-@keyframes sigh {
-  0%, 100% { transform: scale(1); }
-  40%      { transform: scale(1.06, 0.94) translateY(2px); }
-  70%      { transform: scale(0.95, 1.04) translateY(-3px); }
-}
-@keyframes sigh-mouth {
-  0%, 100% { d: path("M -12 18 Q 0 24 12 18"); }
-  50%      { d: path("M -12 22 Q 0 16 12 22"); }
-}
+.card.state-idle .character.act-sigh  .body-group { animation: sigh 1.8s ease-in-out 1; }
+.card.state-idle .character.act-sigh  .mouth      { animation: sigh-mouth 1.8s ease-in-out 1; }
+@keyframes sigh       { 0%,100%{transform:scale(1);} 40%{transform:scale(1.06,0.94) translateY(2px);} 70%{transform:scale(0.95,1.04) translateY(-3px);} }
+@keyframes sigh-mouth { 0%,100%{d:path("M -12 18 Q 0 24 12 18");} 50%{d:path("M -12 22 Q 0 16 12 22");} }
 
-.character.act-sleep .zzz { animation: zzz-float 3s ease-out 1; }
-.character.act-sleep .eyes { animation: sleep-eyes 3s ease-in-out 1; }
-@keyframes zzz-float {
-  0%   { opacity: 0; transform: translate(0, 0) scale(0.6); }
-  20%  { opacity: 1; }
-  100% { opacity: 0; transform: translate(50px, -90px) scale(1.4); }
-}
-@keyframes sleep-eyes {
-  0%, 100% { transform: scaleY(1); }
-  15%, 85% { transform: scaleY(0.05); }
-}
+.card.state-idle .character.act-sleep .zzz  { animation: zzz-float  3s ease-out 1; }
+.card.state-idle .character.act-sleep .eyes { animation: sleep-eyes 3s ease-in-out 1; }
+@keyframes zzz-float  { 0%{opacity:0;transform:translate(0,0) scale(0.6);} 20%{opacity:1;} 100%{opacity:0;transform:translate(40px,-70px) scale(1.3);} }
+@keyframes sleep-eyes { 0%,100%{transform:scaleY(1);} 15%,85%{transform:scaleY(0.05);} }
 
 .zzz {
   position: absolute;
-  top: 30px;
-  right: 30px;
+  top: 10%; right: 10%;
   opacity: 0;
   font-family: "Comic Sans MS", "Marker Felt", cursive;
-  font-size: 24px;
+  font-size: calc(var(--mascot-size) * 0.11);
   color: var(--accent);
 }
-.zzz span:nth-child(2) { font-size: 20px; margin-left: 2px; }
-.zzz span:nth-child(3) { font-size: 16px; margin-left: 2px; }
+.zzz span:nth-child(2) { font-size: 0.85em; margin-left: 2px; }
+.zzz span:nth-child(3) { font-size: 0.7em;  margin-left: 2px; }
 
-.character.act-tilt { animation: tilt 1.4s ease-in-out 1; }
-@keyframes tilt {
-  0%, 100% { transform: rotate(0) translateY(0); }
-  30%      { transform: rotate(-12deg) translateY(-2px); }
-  60%      { transform: rotate(10deg) translateY(-2px); }
-}
+.card.state-idle .character.act-tilt { animation: tilt 1.4s ease-in-out 1; }
+@keyframes tilt { 0%,100%{transform:rotate(0) translateY(0);} 30%{transform:rotate(-12deg) translateY(-2px);} 60%{transform:rotate(10deg) translateY(-2px);} }
 
-/* ============ DANCING ============
- * Kept lightweight for software-rendered Pi: one transform-only animation per
- * element, smooth cubic-bezier easing, no filters, no per-ray animations.
- */
+/* ============ DANCING ============ */
 
-body.state-dancing .character {
-  animation: dance 0.85s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-body.state-dancing .body-group {
-  animation: dance-body 0.85s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-body.state-dancing .rays {
-  animation: dance-rays 4s linear infinite;
-}
-body.state-dancing .mouth {
-  d: path("M -14 14 Q 0 28 14 14 Q 0 24 -14 14 Z");
-  fill: #2B1810;
-}
-body.state-dancing .cheek { opacity: 0.85; }
+.card.state-dancing .character  { animation: dance 0.85s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.card.state-dancing .body-group { animation: dance-body 0.85s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.card.state-dancing .rays       { animation: dance-rays 4s linear infinite; }
+.card.state-dancing .mouth      { d: path("M -14 14 Q 0 28 14 14 Q 0 24 -14 14 Z"); fill: #2B1810; }
+.card.state-dancing .cheek      { opacity: 0.85; }
 
-@keyframes dance {
-  0%, 100% { transform: translate3d(0, 0, 0) rotate(-9deg); }
-  50%      { transform: translate3d(0, -18px, 0) rotate(9deg); }
-}
-@keyframes dance-body {
-  0%, 100% { transform: scale(1, 1); }
-  50%      { transform: scale(1.06, 0.94); }
-}
-@keyframes dance-rays {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
+@keyframes dance      { 0%,100%{transform:translate3d(0,0,0) rotate(-9deg);} 50%{transform:translate3d(0,-14px,0) rotate(9deg);} }
+@keyframes dance-body { 0%,100%{transform:scale(1,1);} 50%{transform:scale(1.06,0.94);} }
+@keyframes dance-rays { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
 
-.status {
+/* ============ LABELS ============ */
+
+.label {
   position: absolute;
-  bottom: 8px;
-  left: 0;
-  right: 0;
+  top: 4px; left: 4px; right: 4px;
   text-align: center;
   font-size: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  opacity: 0.45;
-  z-index: 2;
-}
-
-.session {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: #fff;
-  text-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.7);
   z-index: 2;
-  opacity: 0;
-  transform: translateY(-8px);
-  transition: opacity 0.4s ease, transform 0.4s ease;
-  pointer-events: none;
-  padding: 0 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-body.state-dancing .session {
-  opacity: 1;
-  transform: translateY(0);
-}
+.grid[data-count="1"] .label { font-size: 16px; top: 8px; }
+.grid[data-count="2"] .label { font-size: 14px; }
 
-body.state-dancing .status {
-  opacity: 0.95;
-  color: #fff;
-  text-shadow: 0 0 8px #ff7eb6;
+.activity {
+  position: absolute;
+  bottom: 4px; left: 4px; right: 4px;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.65;
+  color: var(--accent);
+  z-index: 2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grid[data-count="1"] .activity { font-size: 13px; bottom: 8px; }
+.grid[data-count="2"] .activity { font-size: 11px; }
+
+.card.state-dancing .activity { display: none; }
+.card.state-dancing .label {
+  font-weight: 700;
+  text-shadow: 0 0 8px #ff7eb6, 0 0 4px rgba(0,0,0,0.6);
 }

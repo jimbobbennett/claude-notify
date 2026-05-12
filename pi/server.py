@@ -1,14 +1,23 @@
 #!/usr/bin/env python3
 """Claude Notify — Pi-side server.
 
-Holds a single global state ("idle" or "dancing") and pushes changes to
-connected browsers via Server-Sent Events. Endpoints:
+Holds a dict of sessions keyed by Claude Code's session_id and pushes
+snapshots to connected browsers via Server-Sent Events. Each session
+has its own state ("idle" / "dancing"), label, and optional activity
+word (the whimsy "Frobnicating..." string).
 
-  POST /notify   -> state = dancing
-  POST /idle     -> state = idle
-  GET  /state    -> {"state": ...} (debug)
-  GET  /events   -> SSE stream of state changes
-  GET  /         -> static index.html
+Endpoints:
+
+  POST /notify     -> session.state = dancing; activity cleared
+  POST /idle       -> session.state = idle;    activity cleared
+  POST /heartbeat  -> session created-if-missing in idle; activity set
+  POST /end        -> session removed
+  GET  /state      -> {seq, now, sessions}
+  GET  /events     -> SSE stream of snapshots
+  GET  /           -> static index.html
+
+Old clients that don't send a session_id collapse into a single
+"default" bucket so the Pi keeps working mid-upgrade.
 """
 from __future__ import annotations
 
@@ -23,28 +32,42 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 STATIC_DIR = Path(__file__).parent / "static"
 HOST = "0.0.0.0"
 PORT = 8080
-# Auto-return to idle this many seconds after a /notify, in case the
-# Mac never sends /idle (Claude Code crashed, network blip, etc.).
-AUTO_IDLE_SECONDS = 600
+# Drop a session this many seconds after its last heartbeat or state change.
+IDLE_EVICT_SECONDS = 600
+# Clear a session's activity word this many seconds after its last heartbeat.
+ACTIVITY_TIMEOUT = 10
+# Watchdog poll interval.
+WATCHDOG_INTERVAL = 5
 
 app = Flask(__name__, static_folder=None)
 
-_state_lock = threading.Lock()
-_state = "idle"
-_state_seq = 0
-_session = ""
-_message = ""
-_last_notify_at = 0.0
+_lock = threading.Lock()
+_sessions: dict[str, dict] = {}
+_seq = 0
 _subscribers: list[queue.Queue] = []
 _subscribers_lock = threading.Lock()
 
 
+def _payload_field(name: str, max_len: int = 120) -> str:
+    if request.is_json:
+        body = request.get_json(silent=True) or {}
+        val = body.get(name)
+        if isinstance(val, str):
+            return val.strip()[:max_len]
+    val = request.values.get(name, "")
+    return val.strip()[:max_len] if isinstance(val, str) else ""
+
+
+def _session_id() -> str:
+    sid = _payload_field("session_id", max_len=80)
+    return sid or "default"
+
+
 def _snapshot() -> dict:
     return {
-        "state": _state,
-        "seq": _state_seq,
-        "session": _session,
-        "message": _message,
+        "seq": _seq,
+        "now": time.time(),
+        "sessions": {sid: dict(s) for sid, s in _sessions.items()},
     }
 
 
@@ -61,62 +84,93 @@ def _broadcast() -> None:
             _subscribers.remove(q)
 
 
-def _set_state(new_state: str, session: str = "", message: str = "") -> None:
-    global _state, _state_seq, _session, _message, _last_notify_at
-    with _state_lock:
-        if new_state == "dancing":
-            _last_notify_at = time.time()
-        # Always update session/message even if state is unchanged, so a second
-        # notify from a different project can overwrite the label.
-        changed = (
-            new_state != _state
-            or session != _session
-            or message != _message
-        )
-        if not changed:
-            return
-        _state = new_state
-        _session = session
-        _message = message
-        _state_seq += 1
-    _broadcast()
-
-
-def _auto_idle_watchdog() -> None:
-    while True:
-        time.sleep(15)
-        with _state_lock:
-            should_idle = (
-                _state == "dancing"
-                and time.time() - _last_notify_at > AUTO_IDLE_SECONDS
-            )
-        if should_idle:
-            _set_state("idle")
-
-
-def _payload_field(name: str) -> str:
-    if request.is_json:
-        body = request.get_json(silent=True) or {}
-        val = body.get(name)
-        if isinstance(val, str):
-            return val.strip()[:80]
-    val = request.values.get(name, "")
-    return val.strip()[:80] if isinstance(val, str) else ""
+def _touch(sid: str) -> dict:
+    """Get or create a session and refresh last_seen. Caller holds _lock."""
+    s = _sessions.get(sid)
+    if s is None:
+        s = {
+            "state": "idle",
+            "label": "",
+            "message": "",
+            "activity": "",
+            "last_seen": 0.0,
+            "last_notify_at": 0.0,
+        }
+        _sessions[sid] = s
+    s["last_seen"] = time.time()
+    return s
 
 
 @app.post("/notify")
 def notify():
-    _set_state(
-        "dancing",
-        session=_payload_field("session"),
-        message=_payload_field("message"),
-    )
+    global _seq
+    sid = _session_id()
+    label = _payload_field("session") or _payload_field("label")
+    msg = _payload_field("message")
+    with _lock:
+        s = _touch(sid)
+        s["state"] = "dancing"
+        s["last_notify_at"] = time.time()
+        if label:
+            s["label"] = label
+        s["message"] = msg
+        s["activity"] = ""
+        _seq += 1
+    _broadcast()
     return jsonify(_snapshot())
 
 
 @app.post("/idle")
 def idle():
-    _set_state("idle")
+    global _seq
+    sid = _session_id()
+    label = _payload_field("session") or _payload_field("label")
+    with _lock:
+        s = _touch(sid)
+        s["state"] = "idle"
+        if label:
+            s["label"] = label
+        s["message"] = ""
+        s["activity"] = ""
+        _seq += 1
+    _broadcast()
+    return jsonify(_snapshot())
+
+
+@app.post("/heartbeat")
+def heartbeat():
+    global _seq
+    sid = _session_id()
+    label = _payload_field("session") or _payload_field("label")
+    activity = _payload_field("activity", max_len=40)
+    with _lock:
+        s = _touch(sid)
+        # If Claude is actively working (firing tool hooks), it's no longer
+        # waiting for the user, so a heartbeat downgrades dancing back to idle.
+        s["state"] = "idle"
+        s["message"] = ""
+        if label:
+            s["label"] = label
+        if activity:
+            s["activity"] = activity
+        _seq += 1
+    _broadcast()
+    return jsonify(_snapshot())
+
+
+@app.post("/end")
+def end():
+    global _seq
+    sid = _session_id()
+    with _lock:
+        if sid in _sessions:
+            del _sessions[sid]
+            _seq += 1
+            changed = True
+        else:
+            changed = False
+    if changed:
+        _broadcast()
     return jsonify(_snapshot())
 
 
@@ -157,6 +211,28 @@ def events():
     )
 
 
+def _watchdog() -> None:
+    global _seq
+    while True:
+        time.sleep(WATCHDOG_INTERVAL)
+        now = time.time()
+        changed = False
+        with _lock:
+            for sid in list(_sessions.keys()):
+                s = _sessions[sid]
+                age = now - s["last_seen"]
+                if age > IDLE_EVICT_SECONDS:
+                    del _sessions[sid]
+                    changed = True
+                elif s["activity"] and age > ACTIVITY_TIMEOUT:
+                    s["activity"] = ""
+                    changed = True
+            if changed:
+                _seq += 1
+        if changed:
+            _broadcast()
+
+
 @app.get("/")
 def root():
     return send_from_directory(STATIC_DIR, "index.html")
@@ -168,5 +244,5 @@ def static_files(path: str):
 
 
 if __name__ == "__main__":
-    threading.Thread(target=_auto_idle_watchdog, daemon=True).start()
+    threading.Thread(target=_watchdog, daemon=True).start()
     app.run(host=HOST, port=PORT, threaded=True, debug=False)

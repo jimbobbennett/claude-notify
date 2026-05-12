@@ -1,9 +1,11 @@
 #!/bin/sh
 # Claude Notify installer — macOS / Linux / WSL / Git Bash.
 #
-# Copies notify-pi.sh and idle-pi.sh into ~/.claude/hooks/ and merges the
-# four hook entries (Notification, Stop, UserPromptSubmit, SessionEnd)
-# into ~/.claude/settings.json. Safe to re-run.
+# Copies hook-pi.sh to ~/.claude/hooks/ and merges the seven hook
+# entries (Notification, Stop, UserPromptSubmit, SessionEnd,
+# SessionStart, PreToolUse, PostToolUse) into ~/.claude/settings.json.
+# Safe to re-run; also scrubs any entries pointing at the old
+# notify-pi.sh / idle-pi.sh scripts from previous versions.
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -33,12 +35,19 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# 1. Copy hook scripts.
+# 1. Copy hook script.
 mkdir -p "$HOOKS_DIR"
-cp "$SCRIPT_DIR/notify-pi.sh" "$HOOKS_DIR/notify-pi.sh"
-cp "$SCRIPT_DIR/idle-pi.sh"   "$HOOKS_DIR/idle-pi.sh"
-chmod +x "$HOOKS_DIR/notify-pi.sh" "$HOOKS_DIR/idle-pi.sh"
-echo "Installed hook scripts to $HOOKS_DIR"
+cp "$SCRIPT_DIR/hook-pi.sh" "$HOOKS_DIR/hook-pi.sh"
+chmod +x "$HOOKS_DIR/hook-pi.sh"
+echo "Installed hook-pi.sh to $HOOKS_DIR"
+
+# Clean up obsolete dedicated scripts from older installs.
+for old in notify-pi.sh idle-pi.sh; do
+  if [ -f "$HOOKS_DIR/$old" ]; then
+    rm -f "$HOOKS_DIR/$old"
+    echo "Removed obsolete $HOOKS_DIR/$old"
+  fi
+done
 
 # 2. Persist CLAUDE_NOTIFY_URL if requested.
 if [ -n "$URL" ]; then
@@ -60,8 +69,7 @@ if [ -n "$URL" ]; then
 fi
 
 # 3. Merge hook entries into settings.json.
-NOTIFY_CMD='$HOME/.claude/hooks/notify-pi.sh'
-IDLE_CMD='$HOME/.claude/hooks/idle-pi.sh'
+HOOK_BASE='$HOME/.claude/hooks/hook-pi.sh'
 
 if ! command -v jq >/dev/null 2>&1; then
   cat <<EOF >&2
@@ -76,10 +84,13 @@ Or merge this block into $SETTINGS by hand (keep any existing "hooks"):
 
 {
   "hooks": {
-    "Notification":     [{ "hooks": [{ "type": "command", "command": "$NOTIFY_CMD" }] }],
-    "Stop":             [{ "hooks": [{ "type": "command", "command": "$NOTIFY_CMD" }] }],
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$IDLE_CMD"   }] }],
-    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "$IDLE_CMD"   }] }]
+    "Notification":     [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE notify" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE notify" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE idle" }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE end" }] }],
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE heartbeat" }] }],
+    "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE heartbeat" }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "$HOOK_BASE heartbeat" }] }]
   }
 }
 EOF
@@ -100,21 +111,36 @@ cp "$SETTINGS" "$BACKUP"
 
 TMP="$(mktemp)"
 jq \
-  --arg notify "$NOTIFY_CMD" \
-  --arg idle   "$IDLE_CMD" \
+  --arg base "$HOOK_BASE" \
   '
-  def add_hook($event; $cmd):
+  # Remove any matcher group whose hooks contain a command matching one of
+  # the obsolete script paths, or a command that we are about to install
+  # (so re-running is idempotent).
+  def is_stale($base; $sub):
+    .command == ($base + " " + $sub)
+    or (.command | test("/notify-pi\\.sh($|[^a-z])"))
+    or (.command | test("/idle-pi\\.sh($|[^a-z])"));
+
+  def scrub($base; $sub):
+    map(
+      .hooks |= ((. // []) | map(select(is_stale($base; $sub) | not)))
+    )
+    | map(select((.hooks // []) | length > 0));
+
+  def install_hook($event; $sub):
     .hooks //= {} |
     .hooks[$event] = (
-      (.hooks[$event] // [])
-      | if any(.[]?; (.hooks // [])[]? | .command == $cmd) then .
-        else . + [{ hooks: [{ type: "command", command: $cmd }] }]
-        end
+      ((.hooks[$event] // []) | scrub($base; $sub))
+      + [{ hooks: [{ type: "command", command: ($base + " " + $sub) }] }]
     );
-  add_hook("Notification"; $notify)
-  | add_hook("Stop"; $notify)
-  | add_hook("UserPromptSubmit"; $idle)
-  | add_hook("SessionEnd"; $idle)
+
+  install_hook("Notification";     "notify")
+  | install_hook("Stop";           "notify")
+  | install_hook("UserPromptSubmit"; "idle")
+  | install_hook("SessionEnd";     "end")
+  | install_hook("SessionStart";   "heartbeat")
+  | install_hook("PreToolUse";     "heartbeat")
+  | install_hook("PostToolUse";    "heartbeat")
   ' "$SETTINGS" > "$TMP"
 mv "$TMP" "$SETTINGS"
 echo "Merged hook entries into $SETTINGS (backup: $BACKUP)"
