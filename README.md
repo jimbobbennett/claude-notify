@@ -40,6 +40,11 @@ are wired up:
 | `Notification` | Dance, with the `cwd` basename as the label | Claude Code surfaces a permission prompt or asks a question |
 | `Stop` | Dance | Claude Code finishes a turn (it's now waiting on you) |
 | `UserPromptSubmit` | Back to bored | You hit enter on a new prompt |
+| `SessionEnd` | Back to bored | You quit Claude Code (`/exit`, `/clear`, logout) |
+
+Hard kills (closing the terminal, `kill -9`) don't fire `SessionEnd`. The
+server falls back to idle after `AUTO_IDLE_SECONDS` (default 10 minutes) so
+the mascot can't get stuck dancing forever.
 
 The Pi runs a tiny Flask server that holds the current state and streams changes
 to the browser via Server-Sent Events. The browser is just Chromium in kiosk
@@ -277,9 +282,57 @@ platform — your home directory. Below, `~` and `$HOME` mean:
 Settings file: `~/.claude/settings.json`. Hooks directory:
 `~/.claude/hooks/`. Both are created on first use if they don't exist.
 
-### 1. Copy the hook scripts
+### Quick install (recommended)
+
+The repo ships with installers that copy the hook scripts and merge the
+four hook entries into `settings.json` for you. They're safe to re-run
+(idempotent) and preserve any existing hooks you have.
 
 #### macOS / Linux / WSL / Git Bash
+
+```sh
+./client/install.sh
+# or, with a non-default Pi URL:
+./client/install.sh --url http://192.168.1.42:8080
+```
+
+Requires `jq` to merge JSON safely. If it's missing, the installer
+prints the block to paste in manually. See the prerequisites table for
+how to install `jq` on your OS.
+
+#### Windows (native PowerShell)
+
+```powershell
+.\client\install.ps1
+# or, with a non-default Pi URL:
+.\client\install.ps1 -Url http://192.168.1.42:8080
+```
+
+If PowerShell refuses to run the script, allow it for the current
+session with:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+```
+
+Both installers:
+
+- copy the hook scripts to `~/.claude/hooks/`
+- back up your existing `settings.json` (as `settings.json.bak.<timestamp>`)
+- add four hook entries (`Notification`, `Stop`, `UserPromptSubmit`,
+  `SessionEnd`), leaving anything else in the file untouched
+- skip an entry if your command is already wired in, so re-running is safe
+
+After the installer finishes, **restart Claude Code** (or open `/hooks`)
+to pick up the new hooks. Skip ahead to [Customization](#customization).
+
+### Manual install
+
+If you'd rather wire things up by hand, follow the two steps below.
+
+#### 1. Copy the hook scripts
+
+**macOS / Linux / WSL / Git Bash:**
 
 ```sh
 mkdir -p ~/.claude/hooks
@@ -298,40 +351,15 @@ curl http://claude-notify.local:8080/state
 # {"message":"","seq":N,"session":"some-project","state":"dancing"}
 ```
 
-#### Windows (native PowerShell, no Git Bash / WSL)
-
-If you don't want a bash environment on Windows, drop these two files
-into `$env:USERPROFILE\.claude\hooks\` instead. They use only built-in
-PowerShell:
-
-**`notify-pi.ps1`**
+**Windows (native PowerShell):**
 
 ```powershell
-$ErrorActionPreference = 'SilentlyContinue'
-$url = if ($env:CLAUDE_NOTIFY_URL) { $env:CLAUDE_NOTIFY_URL } else { 'http://claude-notify.local:8080' }
-$raw = [Console]::In.ReadToEnd()
-$session = ''
-$message = ''
-try {
-  $obj = $raw | ConvertFrom-Json
-  if ($obj.cwd)     { $session = Split-Path $obj.cwd -Leaf }
-  if ($obj.message) { $message = $obj.message }
-} catch {}
-$body = @{ session = $session; message = $message } | ConvertTo-Json -Compress
-Invoke-RestMethod -Uri "$url/notify" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 2 | Out-Null
-exit 0
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\hooks" | Out-Null
+Copy-Item client\notify-pi.ps1 "$env:USERPROFILE\.claude\hooks\"
+Copy-Item client\idle-pi.ps1   "$env:USERPROFILE\.claude\hooks\"
 ```
 
-**`idle-pi.ps1`**
-
-```powershell
-$ErrorActionPreference = 'SilentlyContinue'
-$url = if ($env:CLAUDE_NOTIFY_URL) { $env:CLAUDE_NOTIFY_URL } else { 'http://claude-notify.local:8080' }
-Invoke-RestMethod -Uri "$url/idle" -Method Post -TimeoutSec 2 | Out-Null
-exit 0
-```
-
-Test from PowerShell:
+Quick test:
 
 ```powershell
 '{"cwd":"C:\\Users\\you\\some-project","hook_event_name":"Notification"}' `
@@ -340,10 +368,11 @@ Start-Sleep 1
 Invoke-RestMethod http://claude-notify.local:8080/state
 ```
 
-### Overriding the Pi URL
+#### Overriding the Pi URL
 
 If your Pi isn't at `claude-notify.local`, set `CLAUDE_NOTIFY_URL` to its
-address. The scripts pick it up from the environment.
+address. The scripts pick it up from the environment. (The quick
+installer handles this for you via `--url` / `-Url`.)
 
 | Shell | Persistent override |
 | --- | --- |
@@ -353,7 +382,7 @@ address. The scripts pick it up from the environment.
 
 You can also just edit the URL in the script files directly.
 
-### 2. Wire the hooks into Claude Code
+#### 2. Wire the hooks into Claude Code
 
 Edit `~/.claude/settings.json` (or `%USERPROFILE%\.claude\settings.json`
 on Windows) and add a `hooks` block. Merge with any existing keys.
@@ -379,6 +408,13 @@ platforms is bash, so `$HOME` expands correctly:
       }
     ],
     "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "$HOME/.claude/hooks/idle-pi.sh" }
+        ]
+      }
+    ],
+    "SessionEnd": [
       {
         "hooks": [
           { "type": "command", "command": "$HOME/.claude/hooks/idle-pi.sh" }
@@ -415,6 +451,13 @@ each hook entry and point at the `.ps1` files:
           { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\idle-pi.ps1\"" }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "shell": "powershell", "command": "& \"$env:USERPROFILE\\.claude\\hooks\\idle-pi.ps1\"" }
+        ]
+      }
     ]
   }
 }
@@ -430,8 +473,9 @@ permission, and the Pi should light up.
 
 ## Customization
 
-- **Different host / port:** set `CLAUDE_NOTIFY_URL` in your shell env, or
-  edit `client/notify-pi.sh` (and your local PowerShell copy on Windows).
+- **Different host / port:** pass `--url` / `-Url` to the installer, set
+  `CLAUDE_NOTIFY_URL` in your shell env, or edit the default URL in
+  `client/notify-pi.sh` / `client/notify-pi.ps1`.
 - **Different session label:** the script forwards `cwd` basename by
   default. Edit the `jq` expression in `client/notify-pi.sh` to send
   something else — e.g. `session: (.session_id // "")` or a fixed string.
@@ -518,10 +562,10 @@ Everything lands in `~/claude-notify/logs/`:
 │       ├── style.css                   # Idle bob, bored cycle, dance
 │       └── app.js                      # SSE client, state machine
 ├── client/                             # Hook scripts for the Claude-Code host
-│   ├── notify-pi.sh                    # POST /notify, forwards cwd basename
-│   └── idle-pi.sh                      # POST /idle
-│                                       # (Windows-PowerShell variants are
-│                                       #  inline in the README.)
+│   ├── notify-pi.sh   / notify-pi.ps1  # POST /notify, forwards cwd basename
+│   ├── idle-pi.sh     / idle-pi.ps1    # POST /idle
+│   ├── install.sh                      # macOS / Linux / WSL / Git Bash installer
+│   └── install.ps1                     # Native Windows / PowerShell installer
 └── docs/
     ├── idle.png
     └── dancing.png
